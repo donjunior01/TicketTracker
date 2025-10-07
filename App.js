@@ -1,177 +1,427 @@
-import React, { useState } from 'react';
-import { View, Text, FlatList, StyleSheet, SafeAreaView, Pressable, Modal, TextInput, TouchableOpacity, Alert } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
-import { Ionicons } from '@expo/vector-icons'; // For icons
+import React, { useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  SafeAreaView,
+  FlatList,
+  TouchableOpacity,
+  Modal,
+  TextInput,
+  ScrollView,
+  StatusBar,
+  Alert,
+  Platform,
+  RefreshControl,
+} from 'react-native';
 
-// State management for tickets and form
-const App = () => {
-  const [tickets, setTickets] = useState([
-    { id: 1, title: 'Issue 1', description: 'First sample issue', status: 'Created', rating: null },
-    { id: 2, title: 'Issue 2', description: 'Second sample issue', status: 'Under Assistance', rating: null },
-    { id: 3, title: 'Issue 3', description: 'Third sample issue', status: 'Completed', rating: 3 },
-  ]);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [status, setStatus] = useState('Created');
-  const [rating, setRating] = useState(0);
-  const [editingId, setEditingId] = useState(null);
-
-  // Handle saving ticket data with rating confirmation
-  const handleSave = () => {
-    if (title && description) {
-      const newRating = status === 'Completed' ? rating : null;
-      if (editingId && newRating !== tickets.find(t => t.id === editingId).rating) {
-        Alert.alert('Rating Updated', 'Are you sure?', [
-          { text: 'Cancel', onPress: () => {}, style: 'cancel' },
-          { text: 'Yes', onPress: () => {
-            if (editingId) {
-              setTickets(tickets.map(t => t.id === editingId ? { ...t, title, description, status, rating: newRating } : t));
-            } else {
-              setTickets([...tickets, { id: Date.now(), title, description, status, rating: newRating }]);
-            }
-            resetForm();
-          }},
-        ]);
-        return;
-      }
-      if (editingId) {
-        setTickets(tickets.map(t => t.id === editingId ? { ...t, title, description, status, rating: newRating } : t));
-      } else {
-        setTickets([...tickets, { id: Date.now(), title, description, status, rating: newRating }]);
-      }
-      resetForm();
+// TicketItem Component - Displays individual tickets
+const TicketItem = ({ ticket, onEdit, onDelete }) => {
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'Created':
+        return 'rgba(0, 122, 255, 0.85)';
+      case 'Under Assistance':
+        return 'rgba(255, 149, 0, 0.85)';
+      case 'Completed':
+        return 'rgba(52, 199, 89, 0.85)';
+      default:
+        return 'rgba(142, 142, 147, 0.85)';
     }
   };
 
-  // Reset form fields after save or cancel
-  const resetForm = () => {
-    setTitle('');
-    setDescription('');
-    setStatus('Created');
-    setRating(0);
-    setEditingId(null);
-    setModalVisible(false);
-  };
-
-  // Delete a ticket by ID
-  const handleDelete = (id) => {
-    setTickets(tickets.filter(t => t.id !== id));
-  };
-
-  // TicketItem component to render each ticket
-  const TicketItem = ({ ticket }) => {
-    const getStatusColor = (status) => {
-      switch (status) {
-        case 'Created': return '#3498db';
-        case 'Under Assistance': return '#e67e22';
-        case 'Completed': return '#2ecc71';
-        default: return '#ecf0f1';
-      }
-    };
-
-    const getBackgroundColor = () => {
-      return ticket.status === 'Completed' && ticket.rating ? '#34495e' : '#2c3e50';
-    };
-
+  const renderStars = (rating) => {
     return (
-      <Pressable style={({ pressed }) => [
-        styles.ticketItem,
-        { backgroundColor: getBackgroundColor(), elevation: pressed ? 8 : 6 },
-      ]}>
-        <Text style={styles.ticketTitle}>{ticket.title}</Text>
-        <Text style={[styles.ticketStatus, { color: getStatusColor(ticket.status) }]}>
-          Status: {ticket.status}
-        </Text>
-        {ticket.status === 'Completed' && ticket.rating && (
-          <View style={styles.ratingContainer}>
-            <Text style={styles.ratingText}>Rating:</Text>
-            {[1, 2, 3, 4, 5].map((star) => (
-              <Text key={star} style={[styles.star, { color: star <= ticket.rating ? 'gold' : '#bdc3c7' }]}>★</Text>
-            ))}
-          </View>
-        )}
-        <View style={styles.actions}>
-          <Pressable onPress={() => { 
-            setEditingId(ticket.id); 
-            setTitle(ticket.title); 
-            setDescription(ticket.description); 
-            setStatus(ticket.status); 
-            setRating(ticket.rating || 0); 
-            setModalVisible(true); 
-          }}>
-            <Ionicons name="pencil" size={22} color="#3498db" />
-          </Pressable>
-          <Pressable onPress={() => handleDelete(ticket.id)}>
-            <Ionicons name="trash" size={22} color="#e74c3c" />
-          </Pressable>
-        </View>
-      </Pressable>
+      <View style={styles.starsContainer}>
+        {[1, 2, 3, 4, 5].map((star) => (
+          <Text key={star} style={styles.star}>
+            {star <= rating ? '★' : '☆'}
+          </Text>
+        ))}
+      </View>
     );
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Ticket Tracker</Text>
-        <Pressable style={styles.addButton} onPress={() => setModalVisible(true)}>
-          <Text style={styles.addButtonText}>Add New Ticket</Text>
-        </Pressable>
+    <View style={styles.ticketCard}>
+      <View style={styles.ticketCardInner}>
+        <View style={styles.ticketHeader}>
+          <View style={styles.ticketTitleRow}>
+            <Text style={styles.ticketTitle}>{ticket.title}</Text>
+            <View
+              style={[
+                styles.statusBadge,
+                { backgroundColor: getStatusColor(ticket.status) },
+              ]}
+            >
+              <Text style={styles.statusText}>{ticket.status}</Text>
+            </View>
+          </View>
+          <Text style={styles.ticketDescription}>{ticket.description}</Text>
+        </View>
+
+        {ticket.status === 'Completed' && ticket.rating > 0 && (
+          <View style={styles.ratingSection}>
+            <Text style={styles.ratingLabel}>Rating:</Text>
+            {renderStars(ticket.rating)}
+          </View>
+        )}
+
+        <View style={styles.ticketActions}>
+          <TouchableOpacity
+            style={[styles.actionButton, styles.editButton]}
+            onPress={() => onEdit(ticket)}
+          >
+            <Text style={styles.actionButtonText}>Edit</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionButton, styles.deleteButton]}
+            onPress={() => onDelete(ticket.id)}
+          >
+            <Text style={styles.actionButtonText}>Delete</Text>
+          </TouchableOpacity>
+        </View>
       </View>
+    </View>
+  );
+};
+
+// Main App Component
+const App = () => {
+  const [tickets, setTickets] = useState([
+    {
+      id: 1,
+      title: 'Sample Ticket',
+      description: 'This is a sample ticket to get you started',
+      status: 'Created',
+      rating: 0,
+    },
+  ]);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [editingTicket, setEditingTicket] = useState(null);
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    status: 'Created',
+    rating: 0,
+  });
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Open modal for creating or editing a ticket
+  const openModal = (ticket = null) => {
+    if (ticket) {
+      setEditingTicket(ticket);
+      setFormData(ticket);
+    } else {
+      setEditingTicket(null);
+      setFormData({
+        title: '',
+        description: '',
+        status: 'Created',
+        rating: 0,
+      });
+    }
+    setModalVisible(true);
+  };
+
+  // Close modal and reset form
+  const closeModal = () => {
+    setModalVisible(false);
+    setEditingTicket(null);
+    setFormData({
+      title: '',
+      description: '',
+      status: 'Created',
+      rating: 0,
+    });
+  };
+
+  // Save or update ticket
+  const handleSave = () => {
+    if (!formData.title.trim() || !formData.description.trim()) {
+      Alert.alert('Missing Information', 'Please fill in all fields', [
+        { text: 'OK', style: 'default' },
+      ]);
+      return;
+    }
+
+    if (editingTicket) {
+      setTickets(
+        tickets.map((t) =>
+          t.id === editingTicket.id ? { ...formData, id: t.id } : t
+        )
+      );
+      closeModal();
+      Alert.alert('Success', 'Ticket edited successfully', [
+        { text: 'OK', style: 'default' },
+      ]);
+    } else {
+      const newTicket = {
+        ...formData,
+        status: 'Created',
+        rating: 0,
+        id: Date.now(),
+      };
+      setTickets([...tickets, newTicket]);
+      closeModal();
+      Alert.alert('Success', 'New ticket created', [
+        { text: 'OK', style: 'default' },
+      ]);
+    }
+  };
+
+  // Delete ticket with confirmation
+  const handleDelete = (id) => {
+    Alert.alert(
+      'Delete Ticket',
+      'Are you sure you want to delete this ticket? This action cannot be undone.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            setTickets(tickets.filter((t) => t.id !== id));
+            Alert.alert('Deleted', 'Ticket deleted successfully', [
+              { text: 'OK', style: 'default' },
+            ]);
+          },
+        },
+      ]
+    );
+  };
+
+  // Handle pull-to-refresh
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setTimeout(() => {
+      setRefreshing(false);
+      Alert.alert('Refreshed', 'Ticket list refreshed', [
+        { text: 'OK', style: 'default' },
+      ]);
+    }, 1000);
+  }, []);
+
+  // Render rating stars in the modal
+  const renderRatingStars = () => {
+    return (
+      <View style={styles.ratingInputContainer}>
+        <Text style={styles.modalLabel}>Rating (for Completed tickets)</Text>
+        <View style={styles.starsInputWrapper}>
+          <View style={styles.starsInputRow}>
+            {[1, 2, 3, 4, 5].map((star) => (
+              <TouchableOpacity
+                key={star}
+                onPress={() => setFormData({ ...formData, rating: star })}
+                disabled={formData.status !== 'Completed'}
+              >
+                <Text
+                  style={[
+                    styles.starInput,
+                    formData.status !== 'Completed' && styles.starDisabled,
+                  ]}
+                >
+                  {star <= formData.rating ? '★' : '☆'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  // Memoized renderItem function
+  const renderItem = useCallback(
+    ({ item }) => (
+      <TicketItem
+        ticket={item}
+        onEdit={openModal}
+        onDelete={handleDelete}
+      />
+    ),
+    [openModal, handleDelete]
+  );
+
+  // Item layout for FlatList optimization
+  const getItemLayout = (data, index) => ({
+    length: 200, // Approximate height of each ticket item
+    offset: 200 * index,
+    index,
+  });
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      
+      <View style={styles.backgroundGradient} />
+      
+      <View style={styles.header}>
+        <View style={styles.headerGlass}>
+          <Text style={styles.headerTitle}>Ticket Tracker</Text>
+          <Text style={styles.headerSubtitle}>
+            Manage your support tickets
+          </Text>
+        </View>
+      </View>
+
       <FlatList
         data={tickets}
-        renderItem={({ item }) => <TicketItem ticket={item} />}
-        keyExtractor={item => item.id.toString()}
-        style={styles.list}
-        ListEmptyComponent={<Text style={styles.emptyText}>No tickets yet.</Text>}
+        keyExtractor={(item) => item.id.toString()}
+        renderItem={renderItem}
+        contentContainerStyle={styles.listContainer}
+        showsVerticalScrollIndicator={false}
+        bounces={true}
+        scrollEnabled={true}
+        nestedScrollEnabled={true}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={21}
+        removeClippedSubviews={true}
+        getItemLayout={getItemLayout}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#FFFFFF"
+            colors={['#60A5FA']}
+          />
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <View style={styles.emptyGlass}>
+              <Text style={styles.emptyText}>No tickets yet</Text>
+              <Text style={styles.emptySubtext}>
+                Pull to refresh or create your first ticket to get started
+              </Text>
+            </View>
+          </View>
+        }
       />
+
+      <TouchableOpacity
+        style={styles.addButton}
+        onPress={() => openModal()}
+        activeOpacity={0.8}
+      >
+        <View style={styles.addButtonGlass}>
+          <Text style={styles.addButtonText}>✨ Add New Ticket</Text>
+        </View>
+      </TouchableOpacity>
+
       <Modal
         visible={modalVisible}
         animationType="slide"
         transparent={true}
-        onRequestClose={resetForm}
+        onRequestClose={closeModal}
       >
-        <View style={styles.modalView}>
-          <Text style={styles.modalTitle}>{editingId ? 'Edit Ticket' : 'Add New Ticket'}</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Title"
-            value={title}
-            onChangeText={setTitle}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Description"
-            value={description}
-            onChangeText={setDescription}
-            multiline
-          />
-          <Picker
-            selectedValue={status}
-            style={styles.picker}
-            onValueChange={setStatus}
-          >
-            <Picker.Item label="Created" value="Created" />
-            <Picker.Item label="Under Assistance" value="Under Assistance" />
-            <Picker.Item label="Completed" value="Completed" />
-          </Picker>
-          {status === 'Completed' && (
-            <View style={styles.ratingContainer}>
-              <Text style={styles.ratingText}>Rating:</Text>
-              {[1, 2, 3, 4, 5].map((star) => (
-                <TouchableOpacity key={star} onPress={() => setRating(star)}>
-                  <Text style={[styles.star, { color: star <= rating ? 'gold' : '#bdc3c7' }]}>★</Text>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalContentGlass}>
+              <View style={styles.modalHeader}>
+                <TouchableOpacity onPress={closeModal} style={styles.modalCancelButton}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
                 </TouchableOpacity>
-              ))}
+                <Text style={styles.modalTitle}>
+                  {editingTicket ? 'Edit Ticket' : 'New Ticket'}
+                </Text>
+                <TouchableOpacity onPress={handleSave} style={styles.modalSaveButton}>
+                  <Text style={styles.modalSaveText}>
+                    {editingTicket ? 'Save' : 'Add'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView 
+                showsVerticalScrollIndicator={false} 
+                style={styles.modalBody}
+                bounces={true}
+                scrollEnabled={true}
+                nestedScrollEnabled={true}
+                keyboardShouldPersistTaps="handled"
+              >
+                <View style={styles.inputGroup}>
+                  <Text style={styles.modalLabel}>Title</Text>
+                  <View style={styles.inputWrapper}>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Enter ticket title"
+                      placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                      value={formData.title}
+                      onChangeText={(text) =>
+                        setFormData({ ...formData, title: text })
+                      }
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.modalLabel}>Description</Text>
+                  <View style={styles.inputWrapper}>
+                    <TextInput
+                      style={[styles.input, styles.textArea]}
+                      placeholder="Enter ticket description"
+                      placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                      value={formData.description}
+                      onChangeText={(text) =>
+                        setFormData({ ...formData, description: text })
+                      }
+                      multiline
+                      numberOfLines={4}
+                    />
+                  </View>
+                </View>
+
+                {editingTicket && (
+                  <>
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.modalLabel}>Status</Text>
+                      <View style={styles.statusPicker}>
+                        {['Created', 'Under Assistance', 'Completed'].map((status) => (
+                          <TouchableOpacity
+                            key={status}
+                            style={[
+                              styles.statusOption,
+                              formData.status === status && styles.statusOptionActive,
+                            ]}
+                            onPress={() => setFormData({ ...formData, status })}
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={[
+                                styles.statusOptionText,
+                                formData.status === status &&
+                                  styles.statusOptionTextActive,
+                              ]}
+                            >
+                              {status}
+                            </Text>
+                            {formData.status === status && (
+                              <Text style={styles.checkmark}>✓</Text>
+                            )}
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+
+                    {renderRatingStars()}
+                  </>
+                )}
+
+                {!editingTicket && (
+                  <View style={styles.infoBox}>
+                    <View style={styles.infoBoxGlass}>
+                      <Text style={styles.infoText}>
+                        New tickets will be created with "Created" status. You can change the status when editing.
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </ScrollView>
             </View>
-          )}
-          <View style={styles.modalButtons}>
-            <Pressable style={styles.saveButton} onPress={handleSave}>
-              <Text style={styles.buttonText}>Save</Text>
-            </Pressable>
-            <Pressable style={styles.cancelButton} onPress={resetForm}>
-              <Text style={styles.buttonText}>Cancel</Text>
-            </Pressable>
           </View>
         </View>
       </Modal>
@@ -179,163 +429,405 @@ const App = () => {
   );
 };
 
+// Styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#2c3e50', // Dark theme background
+    backgroundColor: '#0A0E27',
+  },
+  backgroundGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 400,
+    backgroundColor: '#1E3A8A',
+    opacity: 0.6,
   },
   header: {
-    padding: 15,
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'ios' ? 10 : 40,
+    marginBottom: 10,
+  },
+  headerGlass: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    backdropFilter: 'blur(20px)',
+  },
+  headerTitle: {
+    fontSize: 34,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.374,
+    marginBottom: 4,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+  },
+  headerSubtitle: {
+    fontSize: 15,
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontWeight: '500',
+    letterSpacing: -0.08,
+  },
+  listContainer: {
+    padding: 16,
+    paddingBottom: 100,
+  },
+  ticketCard: {
+    marginBottom: 16,
+    borderRadius: 20,
+    overflow: 'hidden',
+    height: 200, // Fixed height for getItemLayout optimization
+  },
+  ticketCardInner: {
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    backdropFilter: 'blur(30px)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
+    flex: 1,
+  },
+  ticketHeader: {
+    marginBottom: 16,
+  },
+  ticketTitleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#34495e', // Darker header
-    borderBottomLeftRadius: 15,
-    borderBottomRightRadius: 15,
-    elevation: 6,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#ecf0f1', // Light text for contrast
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  list: {
-    padding: 10,
-  },
-  emptyText: {
-    textAlign: 'center',
-    padding: 20,
-    fontStyle: 'italic',
-    color: '#bdc3c7', // Lighter gray for empty state
-    fontSize: 16,
-  },
-  ticketItem: {
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#34495e',
-    elevation: 6,
+    alignItems: 'flex-start',
+    marginBottom: 8,
   },
   ticketTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#ecf0f1',
-  },
-  ticketStatus: {
-    fontSize: 14,
-    marginTop: 5,
-    fontWeight: '500',
-  },
-  addButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 25,
-    backgroundColor: '#3498db', // Strong blue for visibility
-    elevation: 5,
-  },
-  addButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 16,
-    textShadowColor: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    flex: 1,
+    marginRight: 12,
+    letterSpacing: -0.408,
+    textShadowColor: 'rgba(0, 0, 0, 0.2)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1,
+    textShadowRadius: 2,
   },
-  modalView: {
-    margin: 20,
-    backgroundColor: '#34495e',
-    borderRadius: 20,
-    padding: 25,
-    alignItems: 'center',
+  ticketDescription: {
+    fontSize: 15,
+    color: 'rgba(255, 255, 255, 0.8)',
+    lineHeight: 22,
+    fontWeight: '400',
+    letterSpacing: -0.24,
+  },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    backdropFilter: 'blur(10px)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 10,
-    marginTop: 100,
-    flex: 1,
-    justifyContent: 'center',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
-  modalTitle: {
-    marginBottom: 15,
-    textAlign: 'center',
-    fontSize: 22,
+  statusText: {
+    color: '#FFFFFF',
+    fontSize: 12,
     fontWeight: '700',
-    color: '#ecf0f1',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
-  input: {
-    height: 45,
-    borderColor: '#465c71',
-    borderWidth: 1,
-    marginBottom: 15,
-    padding: 10,
-    width: 280,
-    borderRadius: 10,
-    backgroundColor: '#2c3e50',
-    color: '#ecf0f1',
-    fontSize: 16,
-  },
-  picker: {
-    height: 50,
-    width: 280,
-    marginBottom: 15,
-    borderRadius: 10,
-    backgroundColor: '#2c3e50',
-    color: '#ecf0f1',
-  },
-  ratingContainer: {
+  ratingSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.2)',
   },
-  ratingText: {
-    fontSize: 16,
-    marginRight: 10,
-    color: '#ecf0f1',
-    fontWeight: '500',
+  ratingLabel: {
+    fontSize: 15,
+    color: '#FFFFFF',
+    fontWeight: '600',
+    marginRight: 8,
+    letterSpacing: -0.24,
+  },
+  starsContainer: {
+    flexDirection: 'row',
   },
   star: {
-    fontSize: 22,
-    marginHorizontal: 3,
+    fontSize: 18,
+    color: '#FFD700',
+    marginRight: 2,
+    textShadowColor: 'rgba(255, 215, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 4,
   },
-  modalButtons: {
+  ticketActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  actionButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    backdropFilter: 'blur(10px)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+  },
+  editButton: {
+    backgroundColor: 'rgba(0, 122, 255, 0.8)',
+  },
+  deleteButton: {
+    backgroundColor: 'rgba(255, 59, 48, 0.8)',
+  },
+  actionButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  addButton: {
+    position: 'absolute',
+    bottom: 24,
+    left: 20,
+    right: 20,
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  addButtonGlass: {
+    backgroundColor: 'rgba(0, 122, 255, 0.85)',
+    paddingVertical: 18,
+    borderRadius: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    backdropFilter: 'blur(20px)',
+  },
+  addButtonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyGlass: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 24,
+    padding: 40,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    backdropFilter: 'blur(20px)',
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 8,
+    letterSpacing: 0.352,
+  },
+  emptySubtext: {
+    fontSize: 15,
+    color: 'rgba(255, 255, 255, 0.7)',
+    letterSpacing: -0.24,
+    textAlign: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backdropFilter: 'blur(10px)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    maxHeight: '90%',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    overflow: 'hidden',
+    flex: 1,
+  },
+  modalContentGlass: {
+    backgroundColor: 'rgba(20, 30, 60, 0.95)',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    backdropFilter: 'blur(40px)',
+  },
+  modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    width: '100%',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
-  saveButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 15,
-    backgroundColor: '#2ecc71', // Bright green for visibility
-    marginRight: 5,
-    elevation: 5,
+  modalCancelButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    minWidth: 60,
   },
-  cancelButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 15,
-    backgroundColor: '#e74c3c', // Bright red for visibility
-    marginLeft: 5,
-    elevation: 5,
+  modalCancelText: {
+    fontSize: 17,
+    color: '#60A5FA',
+    fontWeight: '500',
+    letterSpacing: -0.408,
   },
-  buttonText: {
-    color: '#fff',
-    textAlign: 'center',
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  modalSaveButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    minWidth: 60,
+    alignItems: 'flex-end',
+  },
+  modalSaveText: {
+    fontSize: 17,
+    color: '#60A5FA',
+    fontWeight: '700',
+    letterSpacing: -0.408,
+  },
+  modalBody: {
+    padding: 20,
+  },
+  inputGroup: {
+    marginBottom: 24,
+  },
+  modalLabel: {
+    fontSize: 13,
     fontWeight: '600',
-    fontSize: 16,
-    textShadowColor: 'rgba(255, 255, 255, 0.5)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1,
+    color: 'rgba(255, 255, 255, 0.8)',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
-  actions: {
+  inputWrapper: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    backdropFilter: 'blur(20px)',
+  },
+  input: {
+    padding: 16,
+    fontSize: 17,
+    color: '#FFFFFF',
+    letterSpacing: -0.408,
+  },
+  textArea: {
+    height: 120,
+    textAlignVertical: 'top',
+  },
+  statusPicker: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    backdropFilter: 'blur(20px)',
+  },
+  statusOption: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginTop: 10,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  statusOptionActive: {
+    backgroundColor: 'rgba(96, 165, 250, 0.3)',
+  },
+  statusOptionText: {
+    fontSize: 17,
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontWeight: '500',
+    letterSpacing: -0.408,
+  },
+  statusOptionTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  checkmark: {
+    fontSize: 18,
+    color: '#60A5FA',
+    fontWeight: '700',
+  },
+  ratingInputContainer: {
+    marginTop: 8,
+  },
+  starsInputWrapper: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    backdropFilter: 'blur(20px)',
+  },
+  starsInputRow: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 20,
+    justifyContent: 'center',
+  },
+  starInput: {
+    fontSize: 40,
+    color: '#FFD700',
+    textShadowColor: 'rgba(255, 215, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
+  },
+  starDisabled: {
+    opacity: 0.3,
+  },
+  infoBox: {
+    marginTop: 8,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  infoBoxGlass: {
+    backgroundColor: 'rgba(96, 165, 250, 0.2)',
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(96, 165, 250, 0.3)',
+    backdropFilter: 'blur(20px)',
+  },
+  infoText: {
+    fontSize: 14,
+    color: '#93C5FD',
+    lineHeight: 20,
+    letterSpacing: -0.24,
+    fontWeight: '500',
   },
 });
 
